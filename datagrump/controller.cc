@@ -12,20 +12,21 @@ using namespace std;
 
 //Delay triggered values
 #define DELAY_TRIGGER true
-#define MAX_DELAY_THRESHOLD 120
+#define MAX_DELAY_THRESHOLD 125
+#define DECREASE_DELAY_THRESHOLD 90
 #define MIN_DELAY_THRESHOLD 60
 
 #define DELTA_DELAY false
 
 #define DEFAULT_CWIND 80
-#define DEFAULT_TIMEOUT 45
+#define DEFAULT_TIMEOUT 125
 #define MIN_CWIND 6
 
 #define EPSILON 3
 
 /* Default constructor */
 Controller::Controller( const bool debug )
-  : debug_( debug ), cwind(DEFAULT_CWIND), lastDelay(-1)
+  : debug_( debug ), cwind(DEFAULT_CWIND), lastDelay(-1), lastVelocity(0), lastTimeReceived(0), timesSinceDecreased(0)
 {}
 
 /* Get current window size, in datagrams */
@@ -71,23 +72,34 @@ void Controller::ack_received( const uint64_t sequence_number_acked,
   float increaseFactor = ADDITIVE_INCREASE;
 
   float delay = timestamp_ack_received - send_timestamp_acked;
-  float diff = delay - lastDelay;
-  float prediction = delay + 2 * diff;
 
-  if (diff > EPSILON){
-    increaseFactor *= lastDelay / delay * .5;
+  float diff = delay - lastDelay;
+  float vel = diff / (timestamp_ack_received - lastTimeReceived);
+  float accel = (vel - lastVelocity);
+  float prediction = delay + 5 * diff;
+
+  //case1: accel is high - decrease cwind faster or increase slower
+
+  if (diff > EPSILON || prediction > MAX_DELAY_THRESHOLD){
+    increaseFactor *= lastDelay / delay * .75;
   }
 
   cerr << "Diff: " << diff << endl;
 
   lastDelay = delay;
+  lastVelocity = vel;
+  lastTimeReceived = timestamp_ack_received;
 
   if (DELAY_TRIGGER){
     if (delay < MIN_DELAY_THRESHOLD && prediction < MAX_DELAY_THRESHOLD){
       cwind += (MIN_DELAY_THRESHOLD / delay) * increaseFactor / cwind;
     }
-    else if (delay > MAX_DELAY_THRESHOLD && cwind > MIN_CWIND){
+    else if (delay > MAX_DELAY_THRESHOLD && cwind > MIN_CWIND && timesSinceDecreased > MIN_CWIND){
       cwind *= DECREASE_FACTOR * (MAX_DELAY_THRESHOLD / delay);
+      timesSinceDecreased = 0;
+    }
+    else if (delay > DECREASE_DELAY_THRESHOLD && vel > 0 && accel > 0 && cwind > MIN_CWIND){
+      cwind -= (delay / MAX_DELAY_THRESHOLD) * increaseFactor / cwind * 4;
     }
   }
 
@@ -109,6 +121,8 @@ void Controller::ack_received( const uint64_t sequence_number_acked,
     cwind = MIN_CWIND;
   }
 
+  timesSinceDecreased ++;
+
   /* Default: take no action */
 
   if ( debug_ ) {
@@ -121,7 +135,7 @@ void Controller::ack_received( const uint64_t sequence_number_acked,
 }
 
 void Controller::timeout() {
-  if (cwind > MIN_CWIND){
+  if (cwind > MIN_CWIND / DECREASE_FACTOR){
     //cwind *= DECREASE_FACTOR;
   }
 }

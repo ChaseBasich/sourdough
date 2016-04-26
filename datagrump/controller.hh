@@ -11,6 +11,9 @@ private:
   bool debug_; /* Enables debugging output */
   float cwind;
   float lastDelay;
+  float lastVelocity;
+  float lastTimeReceived;
+  int timesSinceDecreased;
 
   /* Add member variables here */
 
